@@ -31,7 +31,17 @@ trial_info$end.temp[trial_info$end.temp == 2] = 22
 roach_origins = read.csv("", header=T) %>%
   select(id, sex, origin, date_coll = date)
 
+#need mass of ID. Create "week number" variable the use that to join so that individuals get their mas recording for that week from their record as a partner
+
+id_mass = roach_trials %>%
+  mutate(date = dmy(date),
+         week = week(date) - 44) %>%
+  select(week, id = partner, mass_id2 = mass_partner)
+
 roach_greg = roach_trials %>%
+  mutate(date2 = dmy(date),
+         week = week(date2) - 44) %>%
+  left_join(id_mass, by = c("id", "week")) %>%
   left_join(box_greg, by = c("date", "box")) %>%
   left_join(trial_info, by = "date") %>% 
   left_join(roach_origins, by = "id") %>%
@@ -45,7 +55,8 @@ roach_greg = roach_trials %>%
 #Fitting GLMMs####
 
 #Fit sum_loc as response and offset of number of observations, poisson model
-roach_greg_m1 = glmmTMB(sum_loc ~ sex*scale(mass_partner) + 
+roach_greg_m1 = glmmTMB(sum_loc ~ sex*scale(mass_id2) +
+                          sex*scale(mass_partner) + 
                           scale(mean_temp) + 
                           (1 | id) +  (1 | partner) + (1 | date), 
                         offset = log(n_obs),
@@ -63,26 +74,27 @@ plot(residuals(roach_greg_m1), fitted(roach_greg_m1)) # no directional correlati
 
 ranef_m1 = as.data.frame(VarCorr(roach_greg_m1)[[1]])[1,1:3]
 hux_m1 = hux(summary(roach_greg_m1)$coef$cond) %>%
-  add_columns(c("Intercept", "Sex (Male contrast)", "Body mass of partner",
-                "Temperature", "Sex : Body mass of partner"), after = 0) %>%
+  add_columns(c("Intercept", "Sex (Male contrast)", "Body mass of focal", "Body mass of partner",
+                "Temperature", "Sex : Body mass of focal", "Sex : Body mass of partner"), after = 0) %>%
   add_rows(c("Variable", "Estimate", "Standard Error","Chi-squared","P value"  ), after = 0)
 
 hux_m1 = hux_m1   %>%
-  set_contents(2:6, 4, Anova(roach_greg_m1, type= "III")$Chisq) %>%
-  set_contents(2:6, 5, Anova(roach_greg_m1, type= "III")$Pr) %>%
+  set_contents(2:8, 4, Anova(roach_greg_m1, type= "III")$Chisq) %>%
+  set_contents(2:8, 5, Anova(roach_greg_m1, type= "III")$Pr) %>%
   add_rows(rep(NA, ncol(hux_m1)), after = nrow(hux_m1))  %>%
   add_rows(rep(NA, ncol(hux_m1)), after = nrow(hux_m1))  %>%
   add_rows(rep(NA, ncol(hux_m1)), after = nrow(hux_m1))  %>%
   add_rows(rep(NA, ncol(hux_m1)), after = nrow(hux_m1)) %>%
-  set_contents(7:10, 3, c("Random effect", "Individual", "Partner", "Date")) %>%
-  set_contents(7:10, 4, c("Variance",ranef_m1[,1], ranef_m1[,2], ranef_m1[,3])) %>%
+  set_contents(9:12, 3, c("Random effect", "Individual", "Partner", "Date")) %>%
+  set_contents(9:12, 4, c("Variance",ranef_m1[,1], ranef_m1[,2], ranef_m1[,3])) %>%
   set_number_format(3) %>%
-  set_bottom_border(6, everywhere) 
+  set_bottom_border(8, everywhere) 
 
 quick_docx(hux_m1, file = "Sociability direct & indirect phenotypic effects Table 1.docx")
 
 #compare to version with mean_loc and Gaussian to see how the former is preferable:
-roach_greg_m2 = glmmTMB(mean_loc ~ sex*scale(mass_partner) + 
+roach_greg_m2 = glmmTMB(mean_loc ~ sex*scale(mass_id2) +
+                          sex*scale(mass_partner) + 
                           scale(mean_temp) + 
                           (1 | id) +  (1 | partner) +  (1 | date), 
                         data = roach_greg)
@@ -131,7 +143,8 @@ QGicc(mu = intercept, var.comp = partner_var, var.p = p_var, model = "Poisson.lo
 
 
 #Remove focal ID
-roach_greg_m1b = glmmTMB(sum_loc ~ sex*scale(mass_partner) + 
+roach_greg_m1b = glmmTMB(sum_loc ~ sex*scale(mass_id2) +
+                          sex*scale(mass_partner) + 
                           scale(mean_temp) + 
                            (1 | partner) + (1 | date), #removed id from model
                         offset = log(n_obs),
@@ -145,7 +158,8 @@ AIC(roach_greg_m1b) - AIC(roach_greg_m1)
 
 
 #remove partner ID
-roach_greg_m1c = glmmTMB(sum_loc ~ sex*scale(mass_partner) + 
+roach_greg_m1c = glmmTMB(sum_loc ~ sex*scale(mass_id2) +
+                           sex*scale(mass_partner) + 
                            scale(mean_temp) + 
                            (1 | id) + (1 | date), #removed partner id from model
                          offset = log(n_obs),
@@ -157,7 +171,7 @@ AIC(roach_greg_m1c) - AIC(roach_greg_m1)
 #with partner ID is much better 
 
 #try with mass of partner removed
-roach_greg_m3 = glmmTMB(sum_loc ~ sex + 
+roach_greg_m3 = glmmTMB(sum_loc ~ sex*scale(mass_id2) +
                           scale(mean_temp) + 
                           (1 | id) +  (1 | partner) + (1 | date), 
                         offset = log(n_obs),
@@ -166,7 +180,7 @@ roach_greg_m3 = glmmTMB(sum_loc ~ sex +
 summary(roach_greg_m3)
 
 as.numeric(VarCorr(roach_greg_m1)[[c('cond', 'partner')]])
-as.numeric(VarCorr(roach_greg_m3)[[c('cond', 'partner')]]) #an increase as expected, from 2.00 to 2.14
+as.numeric(VarCorr(roach_greg_m3)[[c('cond', 'partner')]]) #an increase as expected, from 2.13 to 2.19
 
 #Psi by sex####
 
@@ -179,13 +193,14 @@ roach_greg_f = roach_greg %>%
   filter(sex == "f") %>%
   mutate(mean_loc_z = as.numeric(scale(mean_loc)))
 
-roach_greg_psi_f = glmmTMB(mean_loc_z ~ scale(mass_partner) + 
+roach_greg_psi_f = glmmTMB(mean_loc_z ~ scale(mass_id2) + 
+                           scale(mass_partner) + 
                            scale(mean_temp) + 
                            (1 | id) + (1 | partner) + (1 | date), 
                          data = roach_greg_f)
 
 summary(roach_greg_psi_f)
-fixef(roach_greg_psi_f)[[1]]["scale(mass_partner)"] #0.032
+fixef(roach_greg_psi_f)[[1]]["scale(mass_partner)"] #0.068
 
 
 roach_greg_m = roach_greg %>%
@@ -193,13 +208,14 @@ roach_greg_m = roach_greg %>%
   filter(sex == "m") %>%
   mutate(mean_loc_z = as.numeric(scale(mean_loc)))
 
-roach_greg_psi_m = glmmTMB(mean_loc_z ~ scale(mass_partner) + 
+roach_greg_psi_m = glmmTMB(mean_loc_z ~ scale(mass_id2) +
+                             scale(mass_partner) + 
                              scale(mean_temp) + 
                              (1 | id) + (1 | partner) + (1 | date), 
                            data = roach_greg_m)
 
 summary(roach_greg_psi_m)
-fixef(roach_greg_psi_m)[[1]]["scale(mass_partner)"] # -0.130
+fixef(roach_greg_psi_m)[[1]]["scale(mass_partner)"] # -0.129
 
 #Social networks####
 
@@ -388,18 +404,3 @@ for (i in 1:length(unique(roach_assocs$box))) {
 }
 par(mfrow=c(1,1), mar = c(5.1, 4.1, 4.1, 2.1))
 
-#Typically heritabilities of traits in insecta####
-
-#From Moore et al. meta-analysis on maternal effects we also get lots of standard heritability estimates
-#data at: https://datadryad.org/stash/dataset/doi%253A10.5061%252Fdryad.360v97q
-
-moore_data = read.csv("m2.main.csv", header=T)
-summary(moore_data)
-
-means_by_trait_taxa = moore_data %>%
-  group_by(Class, Trait.Type) %>%
-  summarise(mean_h2 = mean(h2, na.rm=T),
-            median_h2 = median(h2, na.rm=T))
-
-filter(means_by_trait_taxa, Class == "Insecta")
-#mean morph for insects is 0.398, while for behaviour it is 0.051 (LH = 0.255, Phys = 0.334)
